@@ -1,0 +1,18 @@
+numpy>=1.19
+opencv-python>=4.5
+matplotlib>=3.3
+Pillow>=8.0
+# Tkinter is included with standard Python installations (python3-tk on Linux)
+# If using Windows or Mac, Tkinter is bundled with Python
+
+# If you use astrometry.net API or related plate solving, you might need:
+requests>=2.25
+
+# If your modules use any of these (uncomment as needed):
+# astropy>=4.0
+# scipy>=1.5
+
+# For logging, threading, os, etc., these are part of the Python standard library and do not need to be listed.
+astroquery>=0.4
+astropy>=5.0
+photutils>=1.5
