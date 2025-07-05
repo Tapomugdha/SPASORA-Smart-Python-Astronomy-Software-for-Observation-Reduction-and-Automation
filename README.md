@@ -31,12 +31,16 @@ Compatible camera and mount hardware (see documentation for supported devices)
 
 ## Installation
 bash
+
 git clone https://github.com/yourusername/spasora.git
+
 cd spasora
+
 pip install -r requirements.txt
 
 ## Running SPASORA
 bash
+
 python gui.py
 
 ## GUI State Visualization
