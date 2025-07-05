@@ -16,3 +16,9 @@ requests>=2.25
 astroquery>=0.4
 astropy>=5.0
 photutils>=1.5
+
+# If you are using a Player One camera on Windows,
+# you must also download and install the PlayerOne Camera SDK (V3.8.1 or later)
+# from https://player-one-astronomy.com/service/software/
+# and follow the installation instructions for your system.
+# Extract all the files in your PlayerOne Camera SDK folder to avoid compilation issues or similar inconveniences.
