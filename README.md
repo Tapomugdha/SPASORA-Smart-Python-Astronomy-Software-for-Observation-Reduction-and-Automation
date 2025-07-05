@@ -32,7 +32,7 @@ Compatible camera and mount hardware (see documentation for supported devices)
 ## Installation
 bash
 
-git clone https://github.com/yourusername/spasora.git
+git clone https://github.com/Tapomugdha/SPASORA-Smart-Python-Astronomy-Software-for-Observation-Reduction-and-Automation-
 
 cd spasora
 
