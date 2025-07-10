@@ -9,29 +9,41 @@ try:
 except ImportError:
     PHOTUTILS_AVAILABLE = False
 
-def detect_stars(frame, threshold_percent=10, fwhm=3.0):
+def ensure_grayscale(img):
+    """Convert to grayscale if image is color or has more than 2 dimensions."""
+    if img.ndim == 3:
+        if img.shape[2] == 3:
+            return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        elif img.shape[2] == 1:
+            return img[:, :, 0]
+        else:
+            raise ValueError(f"Unsupported channel number: {img.shape[2]}")
+    elif img.ndim == 2:
+        return img
+    else:
+        raise ValueError(f"Input image must be 2D or 3D with 1 or 3 channels, got shape {img.shape}")
+
+def detect_stars(frame, threshold_sigma=5, fwhm=3.0):
     """
     Detect all stars in an image.
 
     Parameters:
-        frame: 2D numpy array (grayscale image)
-        threshold_percent: Detection threshold as percent of max pixel value (e.g. 10 for 10%)
+        frame: 2D or 3D numpy array (image)
+        threshold_sigma: Detection threshold in sigma above background (e.g. 5 for 5-sigma)
         fwhm: FWHM for DAOStarFinder (in pixels)
 
     Returns:
         List of centroids [(x, y), ...]
     """
     img = frame.astype(np.float32)
-    if img.ndim == 3:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img = ensure_grayscale(img)
 
     centroids = []
 
     if PHOTUTILS_AVAILABLE:
         # Estimate background statistics
         mean, median, std = sigma_clipped_stats(img, sigma=3.0)
-        # Compute absolute threshold from percent of max
-        abs_threshold = (threshold_percent / 100.0) * (img.max() - median)
+        abs_threshold = threshold_sigma * std
         daofind = DAOStarFinder(fwhm=fwhm, threshold=abs_threshold)
         sources = daofind(img - median)
         if sources is not None and len(sources) > 0:
@@ -40,7 +52,7 @@ def detect_stars(frame, threshold_percent=10, fwhm=3.0):
     else:
         # Fallback: OpenCV-based detection
         blurred = cv2.medianBlur(img.astype(np.uint8), 3)
-        thresh_val = int((threshold_percent / 100.0) * img.max())
+        thresh_val = int((threshold_sigma / 10.0) * img.max())  # GUI slider: 10 ~ 10% of max
         _, thresh = cv2.threshold(blurred, thresh_val, 255, cv2.THRESH_BINARY)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         for cnt in contours:
@@ -51,25 +63,24 @@ def detect_stars(frame, threshold_percent=10, fwhm=3.0):
                 centroids.append((cx, cy))
     return centroids
 
-def detect_star(frame, threshold_percent=10, fwhm=3.0):
+def detect_star(frame, threshold_sigma=5, fwhm=3.0):
     """
     Detect the brightest star in an image.
 
     Parameters:
-        frame: 2D numpy array (grayscale image)
-        threshold_percent: Detection threshold as percent of max pixel value (e.g. 10 for 10%)
+        frame: 2D or 3D numpy array (image)
+        threshold_sigma: Detection threshold in sigma above background (e.g. 5 for 5-sigma)
         fwhm: FWHM for DAOStarFinder (in pixels)
 
     Returns:
         (x, y) centroid of the brightest star, or None if not found.
     """
     img = frame.astype(np.float32)
-    if img.ndim == 3:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img = ensure_grayscale(img)
 
     if PHOTUTILS_AVAILABLE:
         mean, median, std = sigma_clipped_stats(img, sigma=3.0)
-        abs_threshold = (threshold_percent / 100.0) * (img.max() - median)
+        abs_threshold = threshold_sigma * std
         daofind = DAOStarFinder(fwhm=fwhm, threshold=abs_threshold)
         sources = daofind(img - median)
         if sources is not None and len(sources) > 0:
@@ -79,7 +90,7 @@ def detect_star(frame, threshold_percent=10, fwhm=3.0):
             return None
     else:
         blurred = cv2.medianBlur(img.astype(np.uint8), 3)
-        thresh_val = int((threshold_percent / 100.0) * img.max())
+        thresh_val = int((threshold_sigma / 10.0) * img.max())
         _, thresh = cv2.threshold(blurred, thresh_val, 255, cv2.THRESH_BINARY)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         max_area = 0
