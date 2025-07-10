@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from star_detection import detect_stars  # Use your robust detection function
 
 class StarManager:
     def __init__(self, min_brightness=60, max_brightness=250, max_saturation=245):
@@ -9,36 +10,53 @@ class StarManager:
         self.selected_star = None
         self.secondary_stars = []
 
-    def find_candidate_stars(self, frame, threshold_percent=10):
+    def ensure_grayscale(self, img):
+        """Convert to grayscale if image is color or has more than 2 dimensions."""
+        if img.ndim == 3:
+            if img.shape[2] == 3:
+                return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            elif img.shape[2] == 1:
+                return img[:, :, 0]
+            else:
+                raise ValueError(f"Unsupported channel number: {img.shape[2]}")
+        elif img.ndim == 2:
+            return img
+        else:
+            raise ValueError(f"Input image must be 2D or 3D with 1 or 3 channels, got shape {img.shape}")
+
+    def find_candidate_stars(self, frame, threshold_sigma=5, fwhm=3.0, min_brightness=None, max_brightness=None):
         """
-        Find candidate stars in the given frame using Otsu's thresholding.
+        Find candidate stars in the given frame using sigma-based thresholding.
         Returns a list of dicts: {'centroid': (x, y), 'mean': ..., 'max': ..., 'area': ...}
         """
         img = frame.astype(np.float32)
-        # Only convert to grayscale if needed (i.e., if image has 3 channels)
-        if img.ndim == 3 and img.shape[2] == 3:
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.medianBlur(img.astype(np.uint8), 3)
-        # Use Otsu's thresholding for robust star detection
-        _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        img = self.ensure_grayscale(img)
+
+        # Use robust star detection function (photutils or OpenCV fallback)
+        centroids = detect_stars(img, threshold_sigma=threshold_sigma, fwhm=fwhm)
+
+        # Use provided min/max brightness if given, else use object defaults
+        min_bright = self.min_brightness if min_brightness is None else min_brightness
+        max_bright = self.max_brightness if max_brightness is None else max_brightness
+
         candidates = []
-        for cnt in contours:
-            mask = np.zeros(img.shape, dtype=np.uint8)
-            cv2.drawContours(mask, [cnt], -1, 255, -1)
-            mean_val = cv2.mean(img, mask=mask)[0]
-            max_val = np.max(img[mask == 255])
-            area = cv2.contourArea(cnt)
+        for (cx, cy) in centroids:
+            x, y = int(round(cx)), int(round(cy))
+            roi_size = 7
+            x1 = max(x - roi_size // 2, 0)
+            y1 = max(y - roi_size // 2, 0)
+            x2 = min(x + roi_size // 2 + 1, img.shape[1])
+            y2 = min(y + roi_size // 2 + 1, img.shape[0])
+            roi = img[y1:y2, x1:x2]
+            mean_val = np.mean(roi)
+            max_val = np.max(roi)
+            area = roi.size
             if (
-                self.min_brightness < mean_val < self.max_brightness
+                min_bright < mean_val < max_bright
                 and max_val < self.max_saturation
                 and area > 2
             ):
-                M = cv2.moments(cnt)
-                if M['m00'] > 0:
-                    cx = int(M['m10'] / M['m00'])
-                    cy = int(M['m01'] / M['m00'])
-                    candidates.append({'centroid': (cx, cy), 'mean': mean_val, 'max': max_val, 'area': area})
+                candidates.append({'centroid': (cx, cy), 'mean': mean_val, 'max': max_val, 'area': area})
         return candidates
 
     def select_best_star(self, candidates):
@@ -65,34 +83,61 @@ class StarManager:
         # Exclude the primary star
         secondaries = [c['centroid'] for c in candidates if c['centroid'] != primary]
         # Sort by mean brightness, descending
-        secondaries = sorted(secondaries, key=lambda c: -next(x['mean'] for x in candidates if x['centroid'] == c))
+        secondaries = sorted(
+            secondaries,
+            key=lambda c: -next(x['mean'] for x in candidates if x['centroid'] == c)
+        )
         self.secondary_stars = secondaries[:max_secondary]
         return self.secondary_stars
 
-    def is_star_lost(self, frame, centroid, threshold_percent=10, loss_radius=10):
+    def is_star_lost(self, frame, centroid, threshold_sigma=5, loss_radius=10, fwhm=3.0, min_brightness=None, max_brightness=None):
         """
         Check if the star is still near the expected centroid.
         """
-        candidates = self.find_candidate_stars(frame, threshold_percent=threshold_percent)
+        img = frame.astype(np.float32)
+        img = self.ensure_grayscale(img)
+        candidates = self.find_candidate_stars(
+            img,
+            threshold_sigma=threshold_sigma,
+            fwhm=fwhm,
+            min_brightness=min_brightness,
+            max_brightness=max_brightness
+        )
         for star in candidates:
             sx, sy = star['centroid']
             if np.hypot(sx - centroid[0], sy - centroid[1]) < loss_radius:
                 return False  # Star is still there
         return True  # Star lost
 
-    def auto_reacquire(self, frame, threshold_percent=10):
+    def auto_reacquire(self, frame, threshold_sigma=5, fwhm=3.0, min_brightness=None, max_brightness=None):
         """
         Auto-select the best star in the current frame.
         """
-        candidates = self.find_candidate_stars(frame, threshold_percent=threshold_percent)
+        img = frame.astype(np.float32)
+        img = self.ensure_grayscale(img)
+        candidates = self.find_candidate_stars(
+            img,
+            threshold_sigma=threshold_sigma,
+            fwhm=fwhm,
+            min_brightness=min_brightness,
+            max_brightness=max_brightness
+        )
         return self.select_best_star(candidates)
 
-    def manual_select_star(self, click_x, click_y, frame, threshold_percent=10, max_distance=20):
+    def manual_select_star(self, click_x, click_y, frame, threshold_sigma=5, max_distance=20, fwhm=3.0, min_brightness=None, max_brightness=None):
         """
         Manually select the star closest to the clicked coordinates.
         Returns the centroid (x, y) of the selected star, or None if no star within max_distance.
         """
-        candidates = self.find_candidate_stars(frame, threshold_percent=threshold_percent)
+        img = frame.astype(np.float32)
+        img = self.ensure_grayscale(img)
+        candidates = self.find_candidate_stars(
+            img,
+            threshold_sigma=threshold_sigma,
+            fwhm=fwhm,
+            min_brightness=min_brightness,
+            max_brightness=max_brightness
+        )
         if not candidates:
             return None
         centroids = [c['centroid'] for c in candidates]
