@@ -53,8 +53,8 @@ def show_splash():
 
     subtitle_text = (
         "Tapo's Creation:\n"
-        "Smart Python Astronomy Software for Observation,\n"
-        "Reduction, and Automation"
+        "Smart Python Astronomy Software for Observation\n"
+        "and Realtime Automation"
     )
     subtitle = tk.Label(
         splash_root,
@@ -105,7 +105,12 @@ class AstroGUI(tk.Tk):
 
         # Exposure time and threshold variables
         self.exposure_ms = tk.IntVar(value=100)
-        self.threshold_percent = tk.DoubleVar(value=10.0)
+        self.threshold_sigma = tk.DoubleVar(value=5.0)  # Now sigma-based
+
+        # New: FWHM, min/max brightness
+        self.fwhm = tk.DoubleVar(value=5.0)
+        self.min_brightness = tk.DoubleVar(value=60.0)
+        self.max_brightness = tk.DoubleVar(value=250.0)
 
         # Looping (live view) flag
         self.looping = tk.BooleanVar(value=True)
@@ -183,14 +188,47 @@ class AstroGUI(tk.Tk):
         self.exposure_label.grid(row=row, column=0, sticky="ew")
         row += 1
 
-        ttk.Label(controls_frame, text="Threshold (%):").grid(row=row, column=0, sticky="w", pady=(20, 2))
+        ttk.Label(controls_frame, text="Detection Threshold (σ):").grid(row=row, column=0, sticky="w", pady=(20, 2))
         row += 1
-        threshold_slider = ttk.Scale(controls_frame, from_=2, to=20, variable=self.threshold_percent,
+        threshold_slider = ttk.Scale(controls_frame, from_=2, to=10, variable=self.threshold_sigma,
                                      orient='horizontal', command=self.on_threshold_change, length=180)
         threshold_slider.grid(row=row, column=0, sticky="ew")
         row += 1
-        self.threshold_label = ttk.Label(controls_frame, text=f"{self.threshold_percent.get():.1f}%")
+        self.threshold_label = ttk.Label(controls_frame, text=f"{self.threshold_sigma.get():.1f} σ")
         self.threshold_label.grid(row=row, column=0, sticky="ew")
+        row += 1
+
+        # FWHM slider
+        ttk.Label(controls_frame, text="Star FWHM (px):").grid(row=row, column=0, sticky="w", pady=(20, 2))
+        row += 1
+        fwhm_slider = ttk.Scale(controls_frame, from_=2, to=10, variable=self.fwhm,
+                                orient='horizontal', command=self.on_fwhm_change, length=180)
+        fwhm_slider.grid(row=row, column=0, sticky="ew")
+        row += 1
+        self.fwhm_label = ttk.Label(controls_frame, text=f"{self.fwhm.get():.1f} px")
+        self.fwhm_label.grid(row=row, column=0, sticky="ew")
+        row += 1
+
+        # Min brightness slider
+        ttk.Label(controls_frame, text="Min Star Brightness:").grid(row=row, column=0, sticky="w", pady=(20, 2))
+        row += 1
+        min_bright_slider = ttk.Scale(controls_frame, from_=0, to=200, variable=self.min_brightness,
+                                      orient='horizontal', command=self.on_min_brightness_change, length=180)
+        min_bright_slider.grid(row=row, column=0, sticky="ew")
+        row += 1
+        self.min_brightness_label = ttk.Label(controls_frame, text=f"{self.min_brightness.get():.0f}")
+        self.min_brightness_label.grid(row=row, column=0, sticky="ew")
+        row += 1
+
+        # Max brightness slider
+        ttk.Label(controls_frame, text="Max Star Brightness:").grid(row=row, column=0, sticky="w", pady=(20, 2))
+        row += 1
+        max_bright_slider = ttk.Scale(controls_frame, from_=100, to=255, variable=self.max_brightness,
+                                      orient='horizontal', command=self.on_max_brightness_change, length=180)
+        max_bright_slider.grid(row=row, column=0, sticky="ew")
+        row += 1
+        self.max_brightness_label = ttk.Label(controls_frame, text=f"{self.max_brightness.get():.0f}")
+        self.max_brightness_label.grid(row=row, column=0, sticky="ew")
         row += 1
 
         zoom_frame = ttk.Frame(controls_frame)
@@ -217,7 +255,19 @@ class AstroGUI(tk.Tk):
 
     def on_threshold_change(self, val):
         value = float(val)
-        self.threshold_label.config(text=f"{value:.1f}%")
+        self.threshold_label.config(text=f"{value:.1f} σ")
+
+    def on_fwhm_change(self, val):
+        value = float(val)
+        self.fwhm_label.config(text=f"{value:.1f} px")
+
+    def on_min_brightness_change(self, val):
+        value = float(val)
+        self.min_brightness_label.config(text=f"{value:.0f}")
+
+    def on_max_brightness_change(self, val):
+        value = float(val)
+        self.max_brightness_label.config(text=f"{value:.0f}")
 
     def zoom_in(self):
         self.zoom_factor = min(self.zoom_factor * 1.25, 5.0)
@@ -240,7 +290,13 @@ class AstroGUI(tk.Tk):
 
     def auto_detect_star(self):
         frame = self.cam.get_frame()
-        candidates = self.star_manager.find_candidate_stars(frame, threshold_percent=self.threshold_percent.get())
+        candidates = self.star_manager.find_candidate_stars(
+            frame,
+            threshold_sigma=self.threshold_sigma.get(),
+            fwhm=self.fwhm.get(),
+            min_brightness=self.min_brightness.get(),
+            max_brightness=self.max_brightness.get()
+        )
         best = self.star_manager.select_best_star(candidates)
         if best is not None:
             self.reference_pos = best
@@ -261,8 +317,20 @@ class AstroGUI(tk.Tk):
         disp_height = int(height * self.zoom_factor)
         x = int(event.x / disp_width * width)
         y = int(event.y / disp_height * height)
-        candidates = self.star_manager.find_candidate_stars(frame, threshold_percent=self.threshold_percent.get())
-        selected = self.star_manager.manual_select_star(x, y, frame, threshold_percent=self.threshold_percent.get())
+        candidates = self.star_manager.find_candidate_stars(
+            frame,
+            threshold_sigma=self.threshold_sigma.get(),
+            fwhm=self.fwhm.get(),
+            min_brightness=self.min_brightness.get(),
+            max_brightness=self.max_brightness.get()
+        )
+        selected = self.star_manager.manual_select_star(
+            x, y, frame,
+            threshold_sigma=self.threshold_sigma.get(),
+            fwhm=self.fwhm.get(),
+            min_brightness=self.min_brightness.get(),
+            max_brightness=self.max_brightness.get()
+        )
         if selected is not None:
             self.reference_pos = selected
             messagebox.showinfo("Manual Selection", f"Star selected at {selected}")
@@ -278,9 +346,24 @@ class AstroGUI(tk.Tk):
             frame = 128 * np.ones((self.cam.height, self.cam.width, 3), dtype=np.uint8)
             cv2.putText(frame, "No camera frame!", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-        threshold_value = self.threshold_percent.get()
-        candidates = self.star_manager.find_candidate_stars(frame, threshold_percent=threshold_value)
-        if self.reference_pos is None or self.star_manager.is_star_lost(frame, self.reference_pos, threshold_percent=threshold_value):
+        threshold_value = self.threshold_sigma.get()
+        fwhm_value = self.fwhm.get()
+        min_brightness_value = self.min_brightness.get()
+        max_brightness_value = self.max_brightness.get()
+        candidates = self.star_manager.find_candidate_stars(
+            frame,
+            threshold_sigma=threshold_value,
+            fwhm=fwhm_value,
+            min_brightness=min_brightness_value,
+            max_brightness=max_brightness_value
+        )
+        if self.reference_pos is None or self.star_manager.is_star_lost(
+            frame, self.reference_pos,
+            threshold_sigma=threshold_value,
+            fwhm=fwhm_value,
+            min_brightness=min_brightness_value,
+            max_brightness=max_brightness_value
+        ):
             self.reference_pos = self.star_manager.select_best_star(candidates)
             self.dither_manager.reset()
 
